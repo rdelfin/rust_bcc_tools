@@ -1,0 +1,7 @@
+[package]
+name = "exec_snoop"
+version = "0.1.0"
+authors = ["Ricardo Delfin <me@rdelfin.com>"]
+edition = "2018"
+
+[dependencies]
