@@ -5,3 +5,4 @@ authors = ["Ricardo Delfin <me@rdelfin.com>"]
 edition = "2018"
 
 [dependencies]
+bcc = "0.0.12"
