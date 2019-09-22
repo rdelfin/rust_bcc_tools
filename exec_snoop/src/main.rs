@@ -52,8 +52,8 @@ fn event_callback() -> Box<dyn FnMut(&[u8]) + Send> {
         let data = parse_struct(x);
         let date_time = DateTime::<Utc>::from_utc(
             NaiveDateTime::from_timestamp(
-                (data.ts / 1_000_000_000) as i64,
-                (data.ts % 1_000_000_000) as u32,
+                (data.ts / 1_000_000_000u64) as i64,
+                (data.ts % 1_000_000_000u64) as u32,
             ),
             Utc,
         );
