@@ -1,55 +1,75 @@
 extern crate byteorder;
+extern crate chrono;
 extern crate failure;
 extern crate libc;
 
 use bcc::core::BPF;
-use byteorder::{NativeEndian, ReadBytesExt};
+use bcc::perf::init_perf_map;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use failure::Error;
 
 use core::sync::atomic::{AtomicBool, Ordering};
-use std::io::Cursor;
+use std::ptr;
 use std::sync::Arc;
 
+#[repr(C)]
+struct event_t {
+    ts: u64,
+    pid: u32,
+    tid: u32,
+    ppid: u32,
+    ret: u32,
+    executable: [u8; 255],
+}
+
 fn do_main(runnable: Arc<AtomicBool>) -> Result<(), Error> {
-    let code = "
-#include <uapi/linux/ptrace.h>
-struct key_t {
-    char c[80];
-};
-BPF_HASH(counts, struct key_t);
-int count(struct pt_regs *ctx) {
-    if (!PT_REGS_PARM1(ctx))
-        return 0;
-    struct key_t key = {};
-    u64 zero = 0, *val;
-    bpf_probe_read(&key.c, sizeof(key.c), (void *)PT_REGS_PARM1(ctx));
-    val = counts.lookup_or_init(&key, &zero);
-    (*val)++;
-    return 0;
-};
-    ";
+    let code = include_str!("execsnoop.c");
+
     let mut module = BPF::new(code)?;
-    let uprobe_code = module.load_uprobe("count")?;
-    module.attach_uprobe(
-        "/lib/x86_64-linux-gnu/libc.so.6",
-        "strlen",
-        uprobe_code,
-        -1, /* all PIDs */
-    )?;
-    let table = module.table("counts");
+
+    let enter_tp = module.load_tracepoint("trace_entry")?;
+    let return_tp = module.load_tracepoint("trace_return")?;
+    module.attach_tracepoint("syscalls", "sys_enter_execve", enter_tp)?;
+    module.attach_tracepoint("syscalls", "sys_exit_execve", return_tp)?;
+
+    // Where we pick up exec events from
+    let table = module.table("events");
+    // Add callback for the perf pipeline
+    let mut perf_map = init_perf_map(table, event_callback)?;
+
+    // Print header
+    println!("{:-33} {:-7} {:-7} {:-12} {}", "TS", "PPID", "PID", "RET", "EXECUTABLE");
+
     while runnable.load(Ordering::SeqCst) {
-        std::thread::sleep(std::time::Duration::from_millis(1000));
-        for e in &table {
-            // key and value are each a Vec<u8> so we need to transform them into a string and
-            // a u64 respectively
-            let key = get_string(&e.key);
-            let value = Cursor::new(e.value).read_u64::<NativeEndian>().unwrap();
-            if value > 10 {
-                println!("{:?} {:?}", key, value);
-            }
-        }
+        perf_map.poll(200);
     }
+
     Ok(())
+}
+
+fn event_callback() -> Box<dyn FnMut(&[u8]) + Send> {
+    Box::new(|x| {
+        let data = parse_struct(x);
+        let date_time = DateTime::<Utc>::from_utc(
+            NaiveDateTime::from_timestamp(
+                (data.ts / 1_000_000_000) as i64,
+                (data.ts % 1_000_000_000) as u32,
+            ),
+            Utc,
+        );
+        println!(
+            "{:-33} {:-7} {:-7} {:-12} {}",
+            date_time,
+            data.ppid,
+            data.pid,
+            data.ret,
+            get_string(&data.executable)
+        );
+    })
+}
+
+fn parse_struct(x: &[u8]) -> event_t {
+    unsafe { ptr::read(x.as_ptr() as *const event_t) }
 }
 
 fn get_string(x: &[u8]) -> String {
