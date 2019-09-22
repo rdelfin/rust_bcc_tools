@@ -18,7 +18,7 @@ struct event_t {
     pid: u32,
     tid: u32,
     ppid: u32,
-    ret: u32,
+    ret: i32,
     executable: [u8; 255],
 }
 
