@@ -8,7 +8,7 @@ use bcc::core::BPF;
 use bcc::perf::init_perf_map;
 use chrono::Duration;
 use failure::Error;
-use systemstat::{System, Platform};
+use systemstat::{Platform, System};
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use std::ptr;
@@ -40,7 +40,10 @@ fn do_main(runnable: Arc<AtomicBool>) -> Result<(), Error> {
     let mut perf_map = init_perf_map(table, event_callback)?;
 
     // Print header
-    println!("{:-33} {:-7} {:-7} {:-12} {}", "TS", "PPID", "PID", "RET", "EXECUTABLE");
+    println!(
+        "{:-33} {:-7} {:-7} {:-12} {}",
+        "TS", "PPID", "PID", "RET", "EXECUTABLE"
+    );
 
     while runnable.load(Ordering::SeqCst) {
         perf_map.poll(200);
