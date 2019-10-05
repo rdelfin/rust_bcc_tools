@@ -2,11 +2,13 @@ extern crate byteorder;
 extern crate chrono;
 extern crate failure;
 extern crate libc;
+extern crate systemstat;
 
 use bcc::core::BPF;
 use bcc::perf::init_perf_map;
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::Duration;
 use failure::Error;
+use systemstat::{System, Platform};
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use std::ptr;
@@ -48,15 +50,14 @@ fn do_main(runnable: Arc<AtomicBool>) -> Result<(), Error> {
 }
 
 fn event_callback() -> Box<dyn FnMut(&[u8]) + Send> {
-    Box::new(|x| {
+    let boot_time = System::new()
+        .boot_time()
+        .expect("Could not fetch system boot time");
+
+    Box::new(move |x| {
         let data = parse_struct(x);
-        let date_time = DateTime::<Utc>::from_utc(
-            NaiveDateTime::from_timestamp(
-                (data.ts / 1_000_000_000u64) as i64,
-                (data.ts % 1_000_000_000u64) as u32,
-            ),
-            Utc,
-        );
+        let ts_from_boot = Duration::nanoseconds(data.ts as i64);
+        let date_time = boot_time + ts_from_boot;
         println!(
             "{:-33} {:-7} {:-7} {:-12} {}",
             date_time,
