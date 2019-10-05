@@ -1,5 +1,6 @@
 extern crate byteorder;
 extern crate chrono;
+extern crate clap;
 extern crate failure;
 extern crate libc;
 extern crate systemstat;
@@ -7,6 +8,7 @@ extern crate systemstat;
 use bcc::core::BPF;
 use bcc::perf::init_perf_map;
 use chrono::Duration;
+use clap::{App, Arg, ArgMatches};
 use failure::Error;
 use systemstat::{Platform, System};
 
@@ -24,10 +26,19 @@ struct event_t {
     executable: [u8; 255],
 }
 
-fn do_main(runnable: Arc<AtomicBool>) -> Result<(), Error> {
+fn do_main(runnable: Arc<AtomicBool>, matches: ArgMatches) -> Result<(), Error> {
     let code = include_str!("execsnoop.c");
 
-    let mut module = BPF::new(code)?;
+    let code = match matches.value_of("ppid") {
+        Some(ppid) => code
+            .replace("SHOULD_PPID_FILTER", "true")
+            .replace("PPID_FILTER_VALUE", &ppid.to_string()),
+        None => code
+            .replace("SHOULD_PPID_FILTER", "false")
+            .replace("PPID_FILTER_VALUE", "-1"),
+    };
+
+    let mut module = BPF::new(&code)?;
 
     let enter_tp = module.load_tracepoint("trace_entry")?;
     let return_tp = module.load_tracepoint("trace_return")?;
@@ -84,6 +95,20 @@ fn get_string(x: &[u8]) -> String {
 }
 
 fn main() {
+    // CLI setup
+    let matches = App::new("Exec Snoop")
+        .version("1.0")
+        .author("Ricardo Delfin <me@rdelfin.com>")
+        .arg(
+            Arg::with_name("ppid")
+                .short("p")
+                .value_name("PPID")
+                .help("The PPID to filter for")
+                .takes_value(true),
+        )
+        .get_matches();
+
+    // Runnable creation
     let runnable = Arc::new(AtomicBool::new(true));
     let r = runnable.clone();
     ctrlc::set_handler(move || {
@@ -91,7 +116,7 @@ fn main() {
     })
     .expect("Failed to set handler for SIGINT / SIGTERM");
 
-    match do_main(runnable) {
+    match do_main(runnable, matches) {
         Err(x) => {
             eprintln!("Error: {}", x);
             eprintln!("{}", x.backtrace());

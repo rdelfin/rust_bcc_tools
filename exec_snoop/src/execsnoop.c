@@ -42,7 +42,12 @@ int trace_entry(struct sys_enter_execve_args* attr) {
 
     struct task_struct* t = (struct task_struct*)bpf_get_current_task();
 
-    // PPID_FILTER
+    bool should_ppid_filter = SHOULD_PPID_FILTER;
+    int32_t ppid = PPID_FILTER_VALUE;
+
+    if(should_ppid_filter && ppid != t->real_parent->pid) {
+        return 0;
+    }
 
     val.id = (uint64_t)t->tgid << 32 | (uint64_t)t->pid;
     val.ppid = t->real_parent->pid;
